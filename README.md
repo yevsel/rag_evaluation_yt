@@ -57,7 +57,8 @@ traceable via LangSmith.
    (`harness-engineering` or `diffusion-models`). Out-of-scope questions skip retrieval
    entirely and get a short "outside the indexed posts" answer.
 2. **Research** — a ReAct loop where the LLM calls `retrieve_relevant_document`
-   (Pinecone semantic search, `k=5`, optional per-post metadata filter), up to
+   (Pinecone semantic search `k=20` with an optional per-post metadata filter, then
+   Cohere `rerank-v3.5` narrowing to the top 5), up to
    **4 searches per round**.
 3. **Grade** — a critic LLM checks whether the gathered evidence actually covers the
    question and, if not, names what is missing and proposes one better query.
@@ -156,7 +157,7 @@ Cost: $ 0.000412
 |---|---|---|
 | Faithfulness low | writer adds outside knowledge or ignores chunks | `WRITE_ANSWER_SYSTEM` |
 | Answer Relevancy low | answer is accurate but not what was asked | `WRITE_ANSWER_SYSTEM`, `CLASSIFY_SYSTEM` |
-| Contextual Recall low | chunks lack the facts | chunking, `k=5`, `refine_node` queries, ingestion |
+| Contextual Recall low | chunks lack the facts | chunking, `k=20`, rerank `top_n`, `refine_node` queries, ingestion |
 | Contextual Precision low | good chunks buried under noise | `k`, metadata filter, duplicate chunks across rounds |
 | Contextual Relevancy low | retrieval returns off-topic chunks | query wording, per-post `blog_post` filter |
 
@@ -167,8 +168,9 @@ so a full 20-case run can be budgeted.
 
 ## Stack
 
-Python 3.12 · LangGraph · LangChain · Pinecone · DeepEval · OpenAI (`gpt-4o-mini` for
-reasoning and judging, `text-embedding-3-small` for retrieval) · uv
+Python 3.12 · LangGraph · LangChain · Pinecone · Cohere (`rerank-v3.5`) · DeepEval ·
+OpenAI (`gpt-4o-mini` for reasoning and judging, `text-embedding-3-small` for
+retrieval) · uv
 
 ## Project layout
 
@@ -179,7 +181,7 @@ reasoning and judging, `text-embedding-3-small` for retrieval) · uv
 | `nodes.py` | All 11 nodes + Pydantic schemas for structured output |
 | `edges.py` | The 4 routing functions and the loop limits |
 | `prompts.py` | Every system prompt (`CLASSIFY`, `RESEARCH`, `GRADE`, `WRITE_ANSWER`, `CHECK_ANSWER`, `ANSWER_DIRECT`, `GIVE_UP_MESSAGE`) |
-| `tools.py` | `retrieve_relevant_document` — Pinecone semantic search tool |
+| `tools.py` | `retrieve_relevant_document` — Pinecone search (`k=20`) + Cohere rerank (`top_n=5`) |
 | `ingestion.py` | Standalone script that builds the index |
 | `llm_model.py` | The shared `gpt-4o-mini` client |
 | `evals/goldens.json` | 20 golden cases: 13 answerable, 7 refusal (`"DECLINE"`) |
@@ -212,6 +214,7 @@ print(result["answer"])
 | `OPENAI_API_KEY` | Chat completions and embeddings |
 | `PINECONE_API_KEY` | Vector store |
 | `INDEX_NAME` | Pinecone index name (default `agentic-rag-index`) |
+| `COHERE_API_KEY` | Reranking retrieved chunks (`rerank-v3.5`) |
 | `LANGSMITH_*` | Optional tracing |
 
 > `ingestion.py` **deletes the existing index contents** when re-run.
