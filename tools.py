@@ -15,7 +15,7 @@ store = PineconeVectorStore(
     embedding=embedding_model
 )
 
-cohore_client = cohere.Client(os.environ["COHERE_API_KEY"])
+cohere_client = cohere.Client(os.environ["COHERE_API_KEY"])
 
 @tool
 def retrieve_relevant_document(
@@ -32,7 +32,7 @@ def retrieve_relevant_document(
     else:
         docs = store.similarity_search(query, k=20)
         
-    reranked = cohore_client.rerank(
+    reranked = cohere_client.rerank(
         model="rerank-v3.5",
         query=query,
         documents=[d.page_content for d in docs],

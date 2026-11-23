@@ -1,13 +1,13 @@
 # Agentic RAG
 
-An agentic retrieval-augmented generation system built with **LangGraph**, implementing
-three RAG techniques in a single graph over a fixed corpus of two blog posts.
+Agentic RAG built with **LangGraph** over two blog posts, combining three techniques in
+one graph.
 
-| Technique | What it does | Nodes |
+| Technique | Does | Nodes |
 |---|---|---|
-| **Adaptive RAG** | Decides whether the question needs retrieval at all | `classify_node` → `answer_direct_node` |
-| **Corrective RAG** | Judges whether the retrieved evidence is sufficient, and re-searches with a better query if not | `grade_node` → `refine_node` |
-| **Self-RAG** | Verifies the final answer against the retrieved chunks, repairs it, or abstains | `check_answer_node` → `fix_answer_node` / `give_up_node` |
+| **Adaptive RAG** | Decides if retrieval is needed | `classify_node` → `answer_direct_node` |
+| **Corrective RAG** | Grades evidence, re-searches if insufficient | `grade_node` → `refine_node` |
+| **Self-RAG** | Verifies the answer, repairs or abstains | `check_answer_node` → `fix_answer_node` / `give_up_node` |
 
 ## Flow
 
@@ -48,85 +48,57 @@ flowchart TD
     class START,END1,END2,END3 terminal
 ```
 
-Every gate is a separate node, so each step is independently observable and
-traceable via LangSmith.
-
 ## How it works
 
-1. **Classify** — an LLM decides if the question is in scope and which post it targets
-   (`harness-engineering` or `diffusion-models`). Out-of-scope questions skip retrieval
-   entirely and get a short "outside the indexed posts" answer.
-2. **Research** — a ReAct loop where the LLM calls `retrieve_relevant_document`
-   (Pinecone semantic search `k=20` with an optional per-post metadata filter, then
-   Cohere `rerank-v3.5` narrowing to the top 5), up to
-   **4 searches per round**.
-3. **Grade** — a critic LLM checks whether the gathered evidence actually covers the
-   question and, if not, names what is missing and proposes one better query.
-   Up to **2 corrective rounds**, then it writes the best answer it can.
-4. **Write** — the answer is composed strictly from the retrieved chunks, using the
-   author's own wording for definitions.
-5. **Check** — a verifier LLM confirms every claim in the answer is supported by the
-   chunks (and catches claims credited to the wrong post). Up to **2 repairs**, then the
-   system **declines** rather than guessing.
+1. **Classify** — in scope? which post? Out-of-scope questions get a short refusal, no retrieval.
+2. **Research** — ReAct loop over `retrieve_relevant_document`: Pinecone `k=20` (optional
+   `blog_post` filter), then Cohere `rerank-v3.5` → top 5. Max **4 searches** per round.
+3. **Grade** — critic checks coverage; if not covered, names what's missing and proposes a
+   better query. Max **2 corrective rounds**.
+4. **Write** — answer only from chunks, using the author's wording for definitions.
+5. **Check** — verifier checks every claim against the chunks. Max **2 repairs**, then
+   declines instead of guessing.
 
-### Loop budgets
+| Limit | Value |
+|---|---|
+| `MAX_SEARCHES` | 4 per round |
+| `MAX_CORRECTIVE_ATTEMPTS` | 2 |
+| `MAX_REPAIRS` | 2 |
 
-| Limit | Value | Resets when |
-|---|---|---|
-| `MAX_SEARCHES` | 4 | `refine_node` starts a new round |
-| `MAX_CORRECTIVE_ATTEMPTS` | 2 | — |
-| `MAX_REPAIRS` | 2 | — |
-
-Worst case: 3 research rounds × 4 searches = 12 search turns.
-
-## Corpus
-
-Two posts, ingested by `ingestion.py` (scrape → chunk `1000/200` → embed → Pinecone,
-1536-dim, cosine, `aws/us-east-1`):
-
-- **harness-engineering** — *Harness Engineering for Self-Improvement* (Lilian Weng, 2026)
-- **diffusion-models** — *Diffusion Models for Video Generation* (Lilian Weng, 2024)
+Worst case: 3 rounds × 4 searches = 12 searches.
 
 ## Evaluation with DeepEval
 
-The quality gates (`classify`, `grade`, `check_answer`) are LLM judgments, so the system
-is measured with an independent judge instead of eyeballing answers. `evals/` holds a
-golden dataset and a runner that scores every graph run with
-[DeepEval](https://github.com/confident-ai/deepeval).
+`evals/` scores every graph run with [DeepEval](https://github.com/confident-ai/deepeval).
 
-### Golden dataset — `evals/goldens.json`
+### Goldens — `evals/goldens.json`
 
-20 hand-written cases, each with an `input` and an `expected_output`:
+20 cases, each with an `input` and `expected_output`:
 
-| Bucket | Cases | What it covers |
-|---|---|---|
-| Answerable — `harness-engineering` | 6 | harness definition, ACE/MCE, Meta-Harness, STOP, Self-Harness |
-| Answerable — `diffusion-models` | 7 | v-prediction, Imagen Video, Make-A-Video, Text2Video-Zero, Video LDM vs SVD |
-| Refusal — detail not in the corpus | 5 | e.g. Sora's parameter count, AlphaEvolve compute, SVD dataset size |
-| Refusal — false cross-post premise | 1 | "How does the harness post use diffusion models?" |
-| Refusal — out of scope | 1 | "Who won the 2022 FIFA World Cup?" |
+| Bucket | Cases |
+|---|---|
+| Answerable — `harness-engineering` | 6 |
+| Answerable — `diffusion-models` | 7 |
+| Refusal — detail absent from corpus | 5 |
+| Refusal — false cross-post premise | 1 |
+| Refusal — out of scope | 1 |
 
-The 13 answerable cases exercise retrieval + writing. The 7 refusal cases exercise
-`give_up_node` and the "don't guess" contract; their `expected_output` is the literal
-sentinel `"DECLINE"`.
+Refusal cases use `"DECLINE"` as their `expected_output`.
 
 ### Metrics
 
-Each case is built from the final graph state — `answer` becomes `actual_output`, the
-retrieved `chunks` become `retrieval_context` — then measured with five metrics, all
+Built from graph state (`answer` → `actual_output`, `chunks` → `retrieval_context`),
 judged by `gpt-4o-mini`:
 
-| Metric | Threshold | Inputs used | Catches |
-|---|---|---|---|
-| **Faithfulness** | 0.80 | question, answer, chunks | claims the chunks do not support (hallucination) |
-| **Answer Relevancy** | 0.70 | question, answer | answers that dodge or drift off the question |
-| **Contextual Recall** | 0.70 | question, expected answer, chunks | retrieval missing evidence the golden answer needs |
-| **Contextual Precision** | 0.60 | question, expected answer, chunks | relevant chunks ranked below noise |
-| **Contextual Relevancy** | 0.50 | question, chunks | retrieval full of off-topic chunks |
+| Metric | Threshold | Catches |
+|---|---|---|
+| Faithfulness | 0.80 | claims the chunks do not support |
+| Answer Relevancy | 0.70 | answers that dodge the question |
+| Contextual Recall | 0.70 | missing evidence in retrieval |
+| Contextual Precision | 0.60 | relevant chunks ranked below noise |
+| Contextual Relevancy | 0.50 | off-topic retrieval |
 
-The thresholds split into two families: **generation** (Faithfulness, Answer Relevancy)
-and **retrieval** (the three Contextual metrics). That split is what makes a failure
-actionable.
+Faithfulness and Answer Relevancy test generation; the Contextual metrics test retrieval.
 
 ### Running
 
@@ -134,87 +106,78 @@ actionable.
 uv run python -m evals.test_rag
 ```
 
-`python -m` (not a file path) is required so the repo root stays on `sys.path` and
-`from graph import graph` resolves. Each run prints PASS/FAIL, the score, the judge cost,
-and the reason for every failed metric:
+`-m` is required so `from graph import graph` resolves. The runner prints score, cost and
+failure reason per metric, and currently scores only the first 4 goldens
+(`dataset.goldens[0:4]`) — drop the slice for all 20. It is a script, not a pytest
+module, so `deepeval test run` collects nothing.
 
-```
-Question: 1
-Faithfulness: PASS
-Score: 0.92
-Cost: $ 0.000412
-------------------------------------------------------------
-```
+### Reading results
 
-> `evals/test_rag.py` is a **runner script**, not a pytest module: it defines no
-> `test_*` functions, so `deepeval test run` / `pytest` would collect zero tests. Use
-> the command above. It also evaluates only the first 4 goldens
-> (`dataset.goldens[0:4]`) — drop the slice to run all 20.
+| Symptom | Fix |
+|---|---|
+| Faithfulness low | `WRITE_ANSWER_SYSTEM` |
+| Answer Relevancy low | `WRITE_ANSWER_SYSTEM`, `CLASSIFY_SYSTEM` |
+| Contextual Recall low | chunking, `k`, rerank `top_n`, `refine_node` |
+| Contextual Precision low | `k`, metadata filter, duplicate chunks |
+| Contextual Relevancy low | query wording, `blog_post` filter |
 
-### Reading the results
+Each case costs one graph run plus five judge calls; per-metric cost is printed.
 
-| Symptom | Likely cause | Where to fix |
-|---|---|---|
-| Faithfulness low | writer adds outside knowledge or ignores chunks | `WRITE_ANSWER_SYSTEM` |
-| Answer Relevancy low | answer is accurate but not what was asked | `WRITE_ANSWER_SYSTEM`, `CLASSIFY_SYSTEM` |
-| Contextual Recall low | chunks lack the facts | chunking, `k=20`, rerank `top_n`, `refine_node` queries, ingestion |
-| Contextual Precision low | good chunks buried under noise | `k`, metadata filter, duplicate chunks across rounds |
-| Contextual Relevancy low | retrieval returns off-topic chunks | query wording, per-post `blog_post` filter |
+## Corpus
 
-### Cost
+`ingestion.py`: scrape → chunk `1000/200` → embed → Pinecone (1536-dim, cosine,
+`aws/us-east-1`).
 
-Every case runs the full graph *plus* five judge calls; the runner prints per-metric cost
-so a full 20-case run can be budgeted.
+- **harness-engineering** — *Harness Engineering for Self-Improvement* (Lilian Weng, 2026)
+- **diffusion-models** — *Diffusion Models for Video Generation* (Lilian Weng, 2024)
 
 ## Stack
 
-Python 3.12 · LangGraph · LangChain · Pinecone · Cohere (`rerank-v3.5`) · DeepEval ·
-OpenAI (`gpt-4o-mini` for reasoning and judging, `text-embedding-3-small` for
-retrieval) · uv
+Python 3.12 · LangGraph · LangChain · Pinecone · Cohere `rerank-v3.5` · DeepEval ·
+OpenAI `gpt-4o-mini` / `text-embedding-3-small` · uv
 
-## Project layout
+## Layout
 
 | File | Role |
 |---|---|
-| `graph.py` | Compiles the `StateGraph`; exported as `graph` for `langgraph.json` |
-| `state.py` | `AgenticGraphState` — 14 keys, `messages` uses the `add_messages` reducer |
-| `nodes.py` | All 11 nodes + Pydantic schemas for structured output |
-| `edges.py` | The 4 routing functions and the loop limits |
-| `prompts.py` | Every system prompt (`CLASSIFY`, `RESEARCH`, `GRADE`, `WRITE_ANSWER`, `CHECK_ANSWER`, `ANSWER_DIRECT`, `GIVE_UP_MESSAGE`) |
-| `tools.py` | `retrieve_relevant_document` — Pinecone search (`k=20`) + Cohere rerank (`top_n=5`) |
-| `ingestion.py` | Standalone script that builds the index |
-| `llm_model.py` | The shared `gpt-4o-mini` client |
-| `evals/goldens.json` | 20 golden cases: 13 answerable, 7 refusal (`"DECLINE"`) |
-| `evals/test_rag.py` | DeepEval runner: 5 metrics scored against the graph's answer + chunks |
-| `docs/graph_annotated.png` | Annotated architecture diagram |
+| `graph.py` | Compiles the `StateGraph` |
+| `state.py` | `AgenticGraphState` (14 keys) |
+| `nodes.py` | 11 nodes + structured-output schemas |
+| `edges.py` | Routing functions and loop limits |
+| `prompts.py` | All system prompts |
+| `tools.py` | Pinecone search (`k=20`) + Cohere rerank (`top_n=5`) |
+| `ingestion.py` | Builds the index |
+| `llm_model.py` | Shared `gpt-4o-mini` client |
+| `evals/goldens.json` | 20 golden cases |
+| `evals/test_rag.py` | DeepEval runner |
+| `docs/graph_annotated.png` | Architecture diagram |
 
 ## Quick start
 
 ```bash
 uv sync
-cp .env.example .env        # add your keys
-uv run python ingestion.py  # scrape, chunk and embed the two posts
-uv run langgraph dev        # open LangGraph Studio
-uv run python -m evals.test_rag  # score the graph with DeepEval
+cp .env.example .env             # add keys
+uv run python ingestion.py       # build the index
+uv run langgraph dev             # LangGraph Studio
+uv run python -m evals.test_rag  # DeepEval
 ```
 
-To run it from Python instead:
+From Python:
 
 ```python
 from graph import graph
 
-result = graph.invoke({"question": "What are the three components of ACE?"})
-print(result["answer"])
+print(graph.invoke({"question": "What are the three components of ACE?"})["answer"])
 ```
 
-## Configuration
+## Config
 
 | Variable | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | Chat completions and embeddings |
+| `OPENAI_API_KEY` | Chat + embeddings |
 | `PINECONE_API_KEY` | Vector store |
-| `INDEX_NAME` | Pinecone index name (default `agentic-rag-index`) |
-| `COHERE_API_KEY` | Reranking retrieved chunks (`rerank-v3.5`) |
+| `INDEX_NAME` | Index name (default `agentic-rag-index`) |
+| `COHERE_API_KEY` | Reranking |
 | `LANGSMITH_*` | Optional tracing |
 
-> `ingestion.py` **deletes the existing index contents** when re-run.
+> Re-running `ingestion.py` deletes the index contents.
