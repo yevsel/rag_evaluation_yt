@@ -160,16 +160,10 @@ Cost: $ 0.000412
 | Contextual Precision low | good chunks buried under noise | `k`, metadata filter, duplicate chunks across rounds |
 | Contextual Relevancy low | retrieval returns off-topic chunks | query wording, per-post `blog_post` filter |
 
-### Known gaps
+### Cost
 
-- **Refusal is not actually scored.** `"DECLINE"` is a placeholder; the metrics compare
-  the answer to it as if it were prose. Assert `state["refused"]` (or
-  `answer == GIVE_UP_MESSAGE`) instead.
-- **Duplicate chunks.** `chunks` is append-only across corrective rounds, so
-  `retrieval_context` repeats evidence and depresses Contextual Precision/Relevancy.
-- **No regression gate.** Scores are printed, not asserted, so a run cannot fail CI yet.
-- **Cost.** Every case runs the full graph *plus* five judge calls; the runner prints
-  per-metric cost so a full 20-case run can be budgeted.
+Every case runs the full graph *plus* five judge calls; the runner prints per-metric cost
+so a full 20-case run can be budgeted.
 
 ## Stack
 
