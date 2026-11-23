@@ -1,0 +1,82 @@
+[
+  {
+    "input": "How does the harness post define a harness?",
+    "expected_output": "A harness is the system surrounding a base model that orchestrates execution. It decides how the model thinks and plans, calls tools and acts, perceives and manages context, stores artifacts, and evaluates results."
+  },
+  {
+    "input": "What are the three components of Agentic Context Engineering (ACE) and what does each do?",
+    "expected_output": "The Generator produces task trajectories that reference playbook bullets. The Reflector distills insights from successful and failed trajectories. The Curator updates the structured context with incremental, itemized entries."
+  },
+  {
+    "input": "What object does Meta-Harness optimize, and what is its proposer?",
+    "expected_output": "It optimizes the code that determines what information is stored, retrieved and presented to the model, so it is a harness for optimizing harnesses. The proposer is itself a coding agent that reads execution history through the file system (for example with grep or cat), and the output is a set of harness candidates on the Pareto frontier."
+  },
+  {
+    "input": "What cautionary result did the Self-Taught Optimizer (STOP) show about weaker models?",
+    "expected_output": "STOP improved mean downstream performance across iterations with GPT-4 but degraded with weaker models such as GPT-3.5 and Mixtral. Recursive structure alone is not enough; the base model must be capable enough to improve the mechanism."
+  },
+  {
+    "input": "What are the three stages of the Self-Harness loop?",
+    "expected_output": "Weakness mining (cluster failures into verifier-grounded failure patterns), harness proposal (propose bounded edits based on those patterns), and proposal validation (test candidates on held-in and held-out splits and merge only edits that cause no regression on either)."
+  },
+  {
+    "input": "Why is video generation harder than image generation for diffusion models?",
+    "expected_output": "Video needs temporal consistency across frames, which demands more world knowledge in the model. Also, large amounts of high-quality, high-dimensional video data, and especially text-video pairs, are harder to collect than text or images."
+  },
+  {
+    "input": "What is v-prediction and why is it useful for video diffusion?",
+    "expected_output": "v-prediction, proposed by Salimans and Ho (2022), has the model predict v = alpha_t * epsilon - sigma_t * x. It has been shown to help avoid color shift in video generation compared with epsilon-parameterization."
+  },
+  {
+    "input": "What is the structure of Imagen Video and how did it speed up sampling?",
+    "expected_output": "It is a cascade of 7 diffusion models: a base video model plus 3 temporal super-resolution (TSR) and 3 spatial super-resolution (SSR) models, with a frozen T5 text encoder for conditioning. It outputs 1280x768 video at 24 fps, and progressive distillation reduced every model to 8 sampling steps without noticeable loss in perceptual quality."
+  },
+  {
+    "input": "What are the key components of Make-A-Video and how is it trained?",
+    "expected_output": "A base text-to-image model trained on text-image pairs, spatiotemporal convolution and attention layers that add the temporal dimension, and a frame interpolation network for higher frame rate. The decoder, prior and super-resolution models are first trained on images alone, then new temporal layers (initialized as identity) are fine-tuned on unlabeled video."
+  },
+  {
+    "input": "What two mechanisms let Text2Video-Zero generate video without any training?",
+    "expected_output": "It samples the sequence of latent codes with motion dynamics to keep the global scene and background temporally consistent, and it replaces self-attention with cross-frame attention to the first frame to preserve the foreground object's appearance and identity."
+  },
+  {
+    "input": "How do ACE and MCE differ in the way they manage context?",
+    "expected_output": "ACE keeps one playbook of itemized bullets (identifier plus description) updated by a generator, reflector and curator with deterministic merge logic, but its update rules and workflow are handcrafted. MCE enforces no heuristic structure; it uses free-form skills and evolves the skill and the skill-conditioned context together, implemented as files such as skill.md."
+  },
+  {
+    "input": "How do Text2Video-Zero and ControlVideo differ in their cross-frame attention and what extra mechanisms does ControlVideo add?",
+    "expected_output": "Text2Video-Zero makes every frame attend only to the first frame. ControlVideo uses full cross-frame interaction across all frames. ControlVideo also adds an interleaved-frame smoother (interpolating alternate frames to reduce flicker) and a hierarchical sampler (keyframes first, then short clips) to support long videos under memory limits."
+  },
+  {
+    "input": "How do Video LDM and Stable Video Diffusion differ in what they fine-tune and how they train?",
+    "expected_output": "Video LDM trains an image LDM first, then fine-tunes only the newly added temporal layers while the spatial layers stay frozen (and separately fine-tunes the decoder with a video-aware discriminator while the encoder stays frozen). SVD also inserts temporal layers but fine-tunes the entire model, using three stages (text-to-image pretraining, video pretraining on a larger curated dataset, high-quality video finetuning) and stressing dataset curation."
+  },
+  {
+    "input": "Why should a harness keep durable state in files instead of carrying everything in context?",
+    "expected_output": "Artifacts such as experiment logs, code diffs, paper summaries, error traces and past trajectories can grow far longer than the model's context window. Files hold durable state, and reading, writing and editing files (usually via bash) is a foundation LLM skill that improves as the core model improves."
+  },
+  {
+    "input": "What does Meta Context Engineering (MCE) separate, and at which levels does it optimize?",
+    "expected_output": "MCE separates the mechanism (how context is managed) from the artifact content (what is actually in the context). Skill evolution runs at the meta-optimization level, while context optimization runs at the base level."
+  },
+  {
+    "input": "How does the Darwin Godel Machine choose which parent agent to branch from?",
+    "expected_output": "It picks a parent with probability proportional to its performance and inversely related to the number of children it already has. The parent then inspects its own benchmark log and proposes edits to its own harness codebase."
+  },
+  {
+    "input": "How is the 3D U-Net in Video Diffusion Models (VDM) factorized over space and time?",
+    "expected_output": "Spatial processing uses space-only convolutions (3x3 becomes 1x3x3) and spatial attention with frames treated as the batch dimension. Temporal processing adds a temporal attention block after each spatial attention block, attending over the frames axis with spatial axes as batch and using relative position embeddings; it is important for temporal coherence."
+  },
+  {
+    "input": "How does Lumiere's space-time U-Net differ from cascaded keyframe-plus-interpolation approaches?",
+    "expected_output": "Lumiere's STUNet generates the entire temporal duration of the video at once in a single pass, removing the dependency on temporal super-resolution components. It downsamples in both time and space so the expensive computation happens in a compact space-time latent space."
+  },
+  {
+    "input": "Compare how ADAS and AFlow search for better agentic workflows.",
+    "expected_output": "ADAS keeps an archive of workflows seeded with simple agents (such as CoT and self-refine); a meta-agent programs new agents in code, refines the draft with two self-refine steps, evaluates it, and adds successes back to the archive. AFlow represents a workflow as a graph (LLM-invoking nodes, code-defined edges) and optimizes it with Monte Carlo Tree Search: select a node, have an LLM modify the workflow, evaluate, and add it back if it improves, stopping when the top-k average plateaus or the budget runs out."
+  },
+  {
+    "input": "Why does the harness post argue that evaluators and permission controls should sit outside the loop that evolves the harness?",
+    "expected_output": "If a program can edit its own harness, abstraction boundaries break, so permission control and security must live outside that loop. Reward hacking remains a risk: a loop optimizes whatever signal it is given. AHE addresses this by making the runs directory, tracer, verifier and LLM configuration read-only, and the post recommends held-out tests, trace audits and human review at key decision points."
+  }
+]

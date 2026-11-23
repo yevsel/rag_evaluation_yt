@@ -1,0 +1,34 @@
+flowchart TD
+    START([START]) --> reset[reset_node]
+    reset --> classify{classify_node}
+
+    classify -->|out_of_scope| direct[answer_direct_node]
+    direct --> END1([END])
+
+    classify -->|in_scope| research[research_node]
+    research -->|tool calls| tools[tools_node]
+    tools -->|results| research
+    research -->|no searches left| grade{grade_node}
+
+    grade -->|not covered| refine[refine_node]
+    refine -->|retry with a new query| research
+    grade -->|covered| write[write_answer_node]
+
+    write --> check{check_answer_node}
+    check -->|pass| END2([END])
+    check -->|fail, repairs left| fix[fix_answer_node]
+    fix -->|rewrite| write
+    check -->|fail, no repairs left| giveup[give_up_node]
+    giveup --> END3([END])
+
+    classDef adaptive fill:#e8ecff,stroke:#4f46e5,color:#1e1b4b
+    classDef corrective fill:#fff4e0,stroke:#ea580c,color:#431407
+    classDef selfrag fill:#e9f7ec,stroke:#16a34a,color:#14532d
+    classDef shared fill:#f1f5f9,stroke:#94a3b8,color:#0f172a
+    classDef terminal fill:#f5f3ff,stroke:#7c3aed,color:#2e1065
+
+    class classify,direct adaptive
+    class grade,refine corrective
+    class check,fix,giveup selfrag
+    class reset,research,tools,write shared
+    class START,END1,END2,END3 terminal

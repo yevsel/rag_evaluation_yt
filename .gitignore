@@ -1,0 +1,25 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# LangGraph local dev server state
+.langgraph_api/
+
+# Tooling caches
+.pytest_cache/
+.deepeval/
+
+# macOS
+.DS_Store
