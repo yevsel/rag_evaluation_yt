@@ -86,23 +86,110 @@ Two posts, ingested by `ingestion.py` (scrape → chunk `1000/200` → embed →
 - **harness-engineering** — *Harness Engineering for Self-Improvement* (Lilian Weng, 2026)
 - **diffusion-models** — *Diffusion Models for Video Generation* (Lilian Weng, 2024)
 
+## Evaluation with DeepEval
+
+The quality gates (`classify`, `grade`, `check_answer`) are LLM judgments, so the system
+is measured with an independent judge instead of eyeballing answers. `evals/` holds a
+golden dataset and a runner that scores every graph run with
+[DeepEval](https://github.com/confident-ai/deepeval).
+
+### Golden dataset — `evals/goldens.json`
+
+20 hand-written cases, each with an `input` and an `expected_output`:
+
+| Bucket | Cases | What it covers |
+|---|---|---|
+| Answerable — `harness-engineering` | 6 | harness definition, ACE/MCE, Meta-Harness, STOP, Self-Harness |
+| Answerable — `diffusion-models` | 7 | v-prediction, Imagen Video, Make-A-Video, Text2Video-Zero, Video LDM vs SVD |
+| Refusal — detail not in the corpus | 5 | e.g. Sora's parameter count, AlphaEvolve compute, SVD dataset size |
+| Refusal — false cross-post premise | 1 | "How does the harness post use diffusion models?" |
+| Refusal — out of scope | 1 | "Who won the 2022 FIFA World Cup?" |
+
+The 13 answerable cases exercise retrieval + writing. The 7 refusal cases exercise
+`give_up_node` and the "don't guess" contract; their `expected_output` is the literal
+sentinel `"DECLINE"`.
+
+### Metrics
+
+Each case is built from the final graph state — `answer` becomes `actual_output`, the
+retrieved `chunks` become `retrieval_context` — then measured with five metrics, all
+judged by `gpt-4o-mini`:
+
+| Metric | Threshold | Inputs used | Catches |
+|---|---|---|---|
+| **Faithfulness** | 0.80 | question, answer, chunks | claims the chunks do not support (hallucination) |
+| **Answer Relevancy** | 0.70 | question, answer | answers that dodge or drift off the question |
+| **Contextual Recall** | 0.70 | question, expected answer, chunks | retrieval missing evidence the golden answer needs |
+| **Contextual Precision** | 0.60 | question, expected answer, chunks | relevant chunks ranked below noise |
+| **Contextual Relevancy** | 0.50 | question, chunks | retrieval full of off-topic chunks |
+
+The thresholds split into two families: **generation** (Faithfulness, Answer Relevancy)
+and **retrieval** (the three Contextual metrics). That split is what makes a failure
+actionable.
+
+### Running
+
+```bash
+uv run python -m evals.test_rag
+```
+
+`python -m` (not a file path) is required so the repo root stays on `sys.path` and
+`from graph import graph` resolves. Each run prints PASS/FAIL, the score, the judge cost,
+and the reason for every failed metric:
+
+```
+Question: 1
+Faithfulness: PASS
+Score: 0.92
+Cost: $ 0.000412
+------------------------------------------------------------
+```
+
+> `evals/test_rag.py` is a **runner script**, not a pytest module: it defines no
+> `test_*` functions, so `deepeval test run` / `pytest` would collect zero tests. Use
+> the command above. It also evaluates only the first 4 goldens
+> (`dataset.goldens[0:4]`) — drop the slice to run all 20.
+
+### Reading the results
+
+| Symptom | Likely cause | Where to fix |
+|---|---|---|
+| Faithfulness low | writer adds outside knowledge or ignores chunks | `WRITE_ANSWER_SYSTEM` |
+| Answer Relevancy low | answer is accurate but not what was asked | `WRITE_ANSWER_SYSTEM`, `CLASSIFY_SYSTEM` |
+| Contextual Recall low | chunks lack the facts | chunking, `k=5`, `refine_node` queries, ingestion |
+| Contextual Precision low | good chunks buried under noise | `k`, metadata filter, duplicate chunks across rounds |
+| Contextual Relevancy low | retrieval returns off-topic chunks | query wording, per-post `blog_post` filter |
+
+### Known gaps
+
+- **Refusal is not actually scored.** `"DECLINE"` is a placeholder; the metrics compare
+  the answer to it as if it were prose. Assert `state["refused"]` (or
+  `answer == GIVE_UP_MESSAGE`) instead.
+- **Duplicate chunks.** `chunks` is append-only across corrective rounds, so
+  `retrieval_context` repeats evidence and depresses Contextual Precision/Relevancy.
+- **No regression gate.** Scores are printed, not asserted, so a run cannot fail CI yet.
+- **Cost.** Every case runs the full graph *plus* five judge calls; the runner prints
+  per-metric cost so a full 20-case run can be budgeted.
+
 ## Stack
 
-Python 3.12 · LangGraph · LangChain · Pinecone · OpenAI (`gpt-4o-mini` for
-reasoning, `text-embedding-3-small` for retrieval) · uv
+Python 3.12 · LangGraph · LangChain · Pinecone · DeepEval · OpenAI (`gpt-4o-mini` for
+reasoning and judging, `text-embedding-3-small` for retrieval) · uv
 
 ## Project layout
 
 | File | Role |
 |---|---|
 | `graph.py` | Compiles the `StateGraph`; exported as `graph` for `langgraph.json` |
-| `state.py` | `AgenticGraphState` — 15 keys, `messages` uses the `add_messages` reducer |
+| `state.py` | `AgenticGraphState` — 14 keys, `messages` uses the `add_messages` reducer |
 | `nodes.py` | All 11 nodes + Pydantic schemas for structured output |
 | `edges.py` | The 4 routing functions and the loop limits |
 | `prompts.py` | Every system prompt (`CLASSIFY`, `RESEARCH`, `GRADE`, `WRITE_ANSWER`, `CHECK_ANSWER`, `ANSWER_DIRECT`, `GIVE_UP_MESSAGE`) |
 | `tools.py` | `retrieve_relevant_document` — Pinecone semantic search tool |
 | `ingestion.py` | Standalone script that builds the index |
 | `llm_model.py` | The shared `gpt-4o-mini` client |
+| `evals/goldens.json` | 20 golden cases: 13 answerable, 7 refusal (`"DECLINE"`) |
+| `evals/test_rag.py` | DeepEval runner: 5 metrics scored against the graph's answer + chunks |
 | `docs/graph_annotated.png` | Annotated architecture diagram |
 
 ## Quick start
@@ -112,6 +199,7 @@ uv sync
 cp .env.example .env        # add your keys
 uv run python ingestion.py  # scrape, chunk and embed the two posts
 uv run langgraph dev        # open LangGraph Studio
+uv run python -m evals.test_rag  # score the graph with DeepEval
 ```
 
 To run it from Python instead:
